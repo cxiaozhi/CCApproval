@@ -123,7 +123,7 @@ async function waitForDecision(id) {
   const toolInput = payload.tool_input || {};
   const summary = summarize(toolName, toolInput);
 
-  const { verdict, reason } = evaluate(toolName, toolInput, cfg.rules);
+  const { verdict, reason } = evaluate(toolName, toolInput, cfg.rules, cfg.unmatchedDefault);
   log(`${toolName} → ${verdict} (${reason}) :: ${summary.slice(0, 200)}`);
 
   if (verdict === 'allow') return answer('allow', `ccapproval auto-allow: ${reason}`);

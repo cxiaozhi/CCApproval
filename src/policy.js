@@ -2,7 +2,9 @@
 /**
  * Policy engine: decides what to do with a Claude Code tool call.
  *
- * Verdicts (first match wins, order: deny > remote > allow > default 'remote'):
+ * Verdicts (first match wins, order: deny > remote > allow > default):
+ * The default for unmatched calls is 'allow' (fully autonomous mode) and can be
+ * changed via config `unmatchedDefault: 'remote'` if you prefer to review unknowns.
  *   deny   — refuse immediately, no prompt
  *   allow  — approve immediately, no prompt
  *   remote — ask the human via email/web dashboard
@@ -82,9 +84,10 @@ function summarize(toolName, toolInput) {
 }
 
 /**
+ * @param {string} unmatchedDefault verdict when no rule matches: 'allow' (default) or 'remote'
  * @returns {{verdict: 'allow'|'deny'|'remote', reason: string, matched: object|null}}
  */
-function evaluate(toolName, toolInput, rules) {
+function evaluate(toolName, toolInput, rules, unmatchedDefault = 'allow') {
   const merged = {
     deny: [...DEFAULT_RULES.deny, ...(rules?.deny || [])],
     remote: [...(rules?.remote || []), ...DEFAULT_RULES.remote], // user remote rules take precedence
@@ -97,7 +100,9 @@ function evaluate(toolName, toolInput, rules) {
       }
     }
   }
-  return { verdict: 'remote', reason: 'no rule matched — requires human review', matched: null };
+  return unmatchedDefault === 'remote'
+    ? { verdict: 'remote', reason: 'no rule matched — requires human review', matched: null }
+    : { verdict: 'allow', reason: 'no dangerous pattern matched — auto-approved', matched: null };
 }
 
 module.exports = { evaluate, summarize, DEFAULT_RULES };

@@ -4,9 +4,11 @@
 
 CCApproval 是一个本地守护程序，挂在 Claude Code 的 **PreToolUse 钩子**上：
 
-- ✅ **安全操作**（读文件、`git status`、`npm test`…）→ 立即自动放行，不打扰你
+- ✅ **绝大多数操作**（读文件、跑脚本、链式命令、写代码…）→ **立即自动放行，零打扰**
 - ⛔ **红线操作**（`rm -rf /`、删系统目录…）→ 直接拒绝
-- 📧 **危险操作**（删文件、`git push`、发布包、改 `.env`…）→ 发邮件/Webhook 通知你，**在手机上点一下批准/拒绝，还能修改命令后再放行**
+- 📧 **危险操作**（删文件、`git push`、发布包、`curl|bash`…）→ 发邮件/Webhook 通知你，**在手机上点一下批准/拒绝，还能修改命令后再放行**
+
+> 默认是**全自动驾驶模式**：没命中危险规则的一律放行。想反过来「未知操作都要人工审」，在 `config.json` 里设 `"unmatchedDefault": "remote"`。
 
 ```
 Claude Code 工具调用
@@ -76,7 +78,7 @@ node install.js             # 注册到 ./.claude/settings.json；--global 对�
   "reason": "为什么要审批" }
 ```
 
-判定顺序：**deny → remote → allow → 默认 remote（人工审核）**。用户规则优先于内置规则。
+判定顺序：**deny → remote → allow → 默认 allow（全自动）**。用户规则优先于内置规则。
 
 内置 remote（需远程审批）：文件删除、`git push/reset --hard`、包发布、`kubectl/terraform` 变更、`curl|bash`、关机等。
 内置 deny：`rm -rf /`、删 Windows 系统目录、`mkfs` 等。

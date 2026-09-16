@@ -23,6 +23,7 @@ const DEFAULTS = {
   timeoutMs: 180000,         // how long the hook waits for a remote decision
   pollMs: 1000,              // decision poll interval
   fallback: 'ask',           // what to do on timeout: 'ask' | 'deny' | 'allow'
+  unmatchedDefault: 'allow', // no rule matched: 'allow' (autonomous) | 'remote' (review everything unknown)
   dataDir: HOME_DIR,
   historyLimit: 200,
   notify: {
@@ -61,6 +62,7 @@ function loadConfig() {
   if (process.env.CCAPPROVAL_TIMEOUT_MS) cfg.timeoutMs = Number(process.env.CCAPPROVAL_TIMEOUT_MS);
   if (process.env.CCAPPROVAL_FALLBACK) cfg.fallback = process.env.CCAPPROVAL_FALLBACK;
   if (process.env.CCAPPROVAL_DATA_DIR) cfg.dataDir = process.env.CCAPPROVAL_DATA_DIR;
+  if (process.env.CCAPPROVAL_UNMATCHED) cfg.unmatchedDefault = process.env.CCAPPROVAL_UNMATCHED;
 
   fs.mkdirSync(cfg.dataDir, { recursive: true });
 
