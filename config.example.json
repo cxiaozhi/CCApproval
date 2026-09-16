@@ -1,0 +1,29 @@
+{
+  "port": 4317,
+  "host": "0.0.0.0",
+  "publicUrl": null,
+  "timeoutMs": 180000,
+  "fallback": "ask",
+  "notify": {
+    "email": {
+      "host": "smtp.qq.com",
+      "port": 465,
+      "secure": true,
+      "auth": { "user": "you@qq.com", "pass": "SMTP授权码" },
+      "from": "you@qq.com",
+      "to": "you@qq.com"
+    },
+    "webhook": null
+  },
+  "rules": {
+    "deny": [
+      { "tool": "Bash", "command": "rm -rf\\s+~", "reason": "deleting home directory" }
+    ],
+    "remote": [
+      { "tool": "Write|Edit|MultiEdit", "path": "\\.(env|pem|key)$", "reason": "modifying secrets file" }
+    ],
+    "allow": [
+      { "tool": "Bash", "command": "^\\s*git\\s+add\\b", "reason": "staging is safe" }
+    ]
+  }
+}

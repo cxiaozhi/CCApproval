@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node F:/workspace/CCApproval/src/hook.js",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}

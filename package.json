@@ -1,0 +1,21 @@
+{
+  "name": "ccapproval",
+  "version": "1.0.0",
+  "description": "Remote approval daemon for Claude Code: auto-approve safe tool calls, get email/webhook approval requests for dangerous ones.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "hook": "node src/hook.js",
+    "install-hook": "node install.js",
+    "test": "node test/policy.test.js && node test/e2e.test.js"
+  },
+  "bin": {
+    "ccapproval": "src/server.js",
+    "ccapproval-hook": "src/hook.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "nodemailer": "^7.0.11"
+  }
+}
