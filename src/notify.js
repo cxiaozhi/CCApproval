@@ -31,10 +31,17 @@ function decisionLinks(cfg, id) {
   };
 }
 
+function beijingTime(iso) {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  } catch { return iso || ''; }
+}
+
 function renderEmailText(req, links) {
   return [
     `Claude Code is asking for approval:`,
     ``,
+    `Time:    ${beijingTime(req.createdAt)} (北京时间)`,
     `Tool:    ${req.toolName}`,
     `Rule:    ${req.reason || ''}`,
     `CWD:     ${req.cwd || ''}`,
@@ -61,6 +68,7 @@ function renderEmailHtml(req, links) {
   <h2 style="margin:0 0 4px">🔐 Claude Code 审批请求</h2>
   <p style="color:#666;margin:0 0 16px">${esc(req.reason || '')}</p>
   <table style="border-collapse:collapse;width:100%;margin-bottom:16px">
+    <tr><td style="padding:4px 8px;color:#888">时间</td><td style="padding:4px 8px">${esc(beijingTime(req.createdAt))} (北京时间)</td></tr>
     <tr><td style="padding:4px 8px;color:#888">Tool</td><td style="padding:4px 8px"><b>${esc(req.toolName)}</b></td></tr>
     <tr><td style="padding:4px 8px;color:#888">CWD</td><td style="padding:4px 8px">${esc(req.cwd)}</td></tr>
   </table>

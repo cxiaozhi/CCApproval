@@ -3,6 +3,19 @@
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/** ISO string → 北京时间 'MM-DD HH:MM:SS' */
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai', hour12: false,
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(d).reduce((o, p) => (o[p.type] = p.value, o), {});
+  return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
 function renderDashboard(store, cfg) {
   const pending = store.listPending();
   const recent = store.listRequests(30).filter(r => r.status !== 'pending').slice(0, 15);
@@ -12,7 +25,7 @@ function renderDashboard(store, cfg) {
     <div class="head">
       <span class="tool">${esc(r.toolName)}</span>
       <span class="reason">${esc(r.reason || '')}</span>
-      <span class="time">${esc(r.createdAt)}</span>
+      <span class="time">${esc(fmtTime(r.createdAt))}</span>
     </div>
     <pre>${esc(r.summary)}\n${esc(JSON.stringify(r.toolInput, null, 2))}</pre>
     <details><summary>修改命令后再批准（可选）</summary>
@@ -25,7 +38,7 @@ function renderDashboard(store, cfg) {
   </div>`;
 
   const histRow = r => `<tr>
-    <td>${esc(r.createdAt?.slice(11, 19))}</td><td>${esc(r.toolName)}</td>
+    <td>${esc(fmtTime(r.createdAt))}</td><td>${esc(r.toolName)}</td>
     <td class="${r.status}">${esc(r.status)}</td><td>${esc((r.summary || '').slice(0, 120))}</td></tr>`;
 
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
