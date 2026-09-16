@@ -13,6 +13,8 @@
  *   GET  /d?id=..&a=allow|deny&t=..   one-click decision link (from email/webhook)
  */
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { loadConfig } = require('./config');
 const { Store } = require('./store');
 const { notifyAll, decisionLinks } = require('./notify');
@@ -111,6 +113,12 @@ store.gc();
 setInterval(() => store.gc(), 3600 * 1000).unref();
 
 server.listen(cfg.port, cfg.host, () => {
+  const pidFile = path.join(cfg.dataDir, 'server.pid');
+  fs.writeFileSync(pidFile, String(process.pid));
+  const cleanup = () => { try { fs.unlinkSync(pidFile); } catch { /* ignore */ } };
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
   console.log(`[ccapproval] listening on http://${cfg.host}:${cfg.port}`);
   console.log(`[ccapproval] dashboard: ${cfg.publicUrl}/?t=${cfg.secret}`);
 });

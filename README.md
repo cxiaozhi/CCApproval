@@ -29,12 +29,25 @@ Claude Code 工具调用
 
 ## 快速开始
 
+### 🖱️ 一键启动（Windows）
+
+双击 **`CCApproval.vbs`** —— 静默无窗口，自动装依赖、后台拉起服务器、并在浏览器打开审批面板。
+（想看日志输出就双击 `start.bat`；停止用 `stop.bat`。）
+
+### ⌨️ 命令行
+
 ```bash
-npm install
-cp config.example.json config.json   # 填入你的 SMTP 配置（可选）
-node install.js                       # 注册 hook 到 ./.claude/settings.json（--global 全局）
-npm start                             # 启动审批服务器（hook 也会自动拉起它）
+npm run launch      # 一键：装依赖检查 + 后台启动 + 打开面板（幂等，重复执行无副作用）
+npm run stop        # 停止后台服务器
 ```
+
+首次使用还需注册 hook（一次即可）：
+
+```bash
+node install.js             # 注册到 ./.claude/settings.json；--global 对所有项目生效
+```
+
+邮件通知（可选）：编辑 `config.json` 填入 SMTP 授权码（首次 launch 会自动从示例生成该文件）。
 
 然后在 Claude Code 里执行 `rm somefile`，你会收到一封带 **✅批准 / ❌拒绝** 按钮的邮件。
 
@@ -90,6 +103,18 @@ cloudflared tunnel --url http://localhost:4317
 ```bash
 node install.js --uninstall        # 移除 hook（--global 对应全局）
 ```
+
+## 一键启动相关文件
+
+| 文件 | 作用 |
+|---|---|
+| `CCApproval.vbs` | 双击静默启动（无黑窗），推荐日常使用 |
+| `start.bat` | 带控制台输出的启动（首跑自动 `npm install`） |
+| `stop.bat` / `npm run stop` | 停止后台服务器（按 PID 文件精确结束，含兜底扫描） |
+| `scripts/launch.js` | 幂等启动器：已在运行则直接打开面板 |
+| `scripts/stop.js` | 停止逻辑 |
+
+服务器在后台运行，PID 记录于 `~/.ccapproval/server.pid`，日志在 `~/.ccapproval/server.out.log`。
 
 ## 测试
 

@@ -6,6 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
+    "launch": "node scripts/launch.js --open",
+    "stop": "node scripts/stop.js",
     "hook": "node src/hook.js",
     "install-hook": "node install.js",
     "test": "node test/policy.test.js && node test/e2e.test.js"
