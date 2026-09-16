@@ -42,7 +42,7 @@ settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter(entry =>
 
 if (!uninstall) {
   settings.hooks.PreToolUse.push({
-    matcher: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task',
+    matcher: 'Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task|ExitPlanTool',
     hooks: [{ type: 'command', command: HOOK_CMD, timeout: 300 }]
   });
 }

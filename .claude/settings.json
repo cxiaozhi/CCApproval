@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task",
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task|ExitPlanTool",
         "hooks": [
           {
             "type": "command",
