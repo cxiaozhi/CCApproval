@@ -29,7 +29,7 @@ const DEFAULT_RULES = {
   ],
   allow: [
     { tool: '^(Read|Glob|Grep|LS|TodoWrite|WebSearch|WebFetch|NotebookRead)$', reason: 'read-only tool' },
-    { tool: 'Bash', command: '^\\s*(ls|dir|pwd|cd|echo|cat|type|which|where|whoami|date)\\b', reason: 'read-only shell builtin' },
+    { tool: 'Bash', command: '^\\s*(ls|dir|pwd|cd|echo|cat|type|which|where|whoami|date)\\b[^&|;]*$', reason: 'read-only shell builtin (no chaining)' },
     { tool: 'Bash', command: '^\\s*git\\s+(status|diff|log|show|branch|fetch|blame|stash list)\\b', reason: 'read-only git' },
     { tool: 'Bash', command: '^\\s*(node|python|python3|npm|npx|pnpm|yarn|pip)\\s+[^&|;]*$', reason: 'local runtime/package command without shell chaining' },
     { tool: 'Bash', command: '^\\s*(mkdir|touch|cp|copy|mv|move|find|rg|grep|findstr)\\b', reason: 'common safe file/search op' }
@@ -43,6 +43,14 @@ function fieldOf(toolInput, keys) {
   return '';
 }
 
+/** Strip harmless output redirections so they don't break chaining checks. */
+function normalizeCommand(cmd) {
+  return String(cmd || '')
+    .replace(/\s*2>\s*&1/g, '')
+    .replace(/\s*1>\s*&2/g, '')
+    .replace(/\s*2>\s*(nul|\/dev\/null)/gi, '');
+}
+
 function matchRule(rule, toolName, toolInput) {
   if (rule.tool) {
     let re;
@@ -50,7 +58,7 @@ function matchRule(rule, toolName, toolInput) {
     if (!re.test(toolName || '')) return false;
   }
   const checks = [];
-  if (rule.command) checks.push([rule.command, fieldOf(toolInput, ['command'])]);
+  if (rule.command) checks.push([rule.command, normalizeCommand(fieldOf(toolInput, ['command']))]);
   if (rule.path) checks.push([rule.path, fieldOf(toolInput, ['file_path', 'notebook_path', 'path'])]);
   if (rule.pattern) checks.push([rule.pattern, JSON.stringify(toolInput || {})]);
   if (checks.length === 0) return true; // tool-only rule

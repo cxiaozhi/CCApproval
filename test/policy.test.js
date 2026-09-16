@@ -18,6 +18,14 @@ const cases = [
   ['Write', { file_path: 'src/index.js', content: 'x' }, 'remote'],   // no allow rule → human review
   ['Edit', { file_path: 'README.md', old_string: 'a', new_string: 'b' }, 'remote'],
   ['WebFetch', { url: 'https://example.com' }, 'allow'],
+  // chained commands must NOT auto-allow (regression: cd x && <anything>)
+  ['Bash', { command: 'cd "F:/workspace/x" && PYTHONIOENCODING=utf-8 python -c "import sys; print(1)" 2>&1' }, 'remote'],
+  ['Bash', { command: 'cd /tmp && ls' }, 'remote'],
+  ['Bash', { command: 'ls && rm -rf build' }, 'remote'],
+  // harmless redirects should not block auto-allow / policy-deny
+  ['Bash', { command: 'npm test 2>&1' }, 'allow'],
+  ['Bash', { command: 'rm -rf / 2>&1' }, 'deny'],
+  ['Bash', { command: 'python -c "print(1)"' }, 'allow'],
 ];
 
 for (const [tool, input, expected] of cases) {
