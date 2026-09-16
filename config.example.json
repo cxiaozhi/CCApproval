@@ -5,6 +5,7 @@
   "timeoutMs": 180000,
   "fallback": "ask",
   "unmatchedDefault": "allow",
+  "remoteAction": "allow",
   "notify": {
     "email": {
       "host": "smtp.qq.com",

@@ -15,6 +15,7 @@ const env = {
   CCAPPROVAL_PORT: String(PORT),
   CCAPPROVAL_TIMEOUT_MS: '15000',
   CCAPPROVAL_FALLBACK: 'ask',
+  CCAPPROVAL_REMOTE_ACTION: 'remote',   // exercise the human-approval flow in this test
   CCAPPROVAL_DATA_DIR: dataDir,
   HOME: os.homedir()
 };
@@ -39,9 +40,9 @@ function get(port, p) {
   });
 }
 
-function runHook(toolInput) {
+function runHook(toolInput, envOverride) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'hook.js')], { env });
+    const child = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'hook.js')], { env: { ...env, ...envOverride } });
     let out = '';
     child.stdout.on('data', c => (out += c));
     child.on('close', () => { try { resolve(JSON.parse(out)); } catch (e) { reject(new Error('hook output: ' + out)); } });
@@ -82,6 +83,15 @@ function runHook(toolInput) {
   const denied = await runHook({ tool: 'Bash', input: { command: 'rm -rf /' } });
   console.assert(denied.hookSpecificOutput.permissionDecision === 'deny', 'policy deny');
   console.log('✔ policy deny path');
+
+  // 4. fully-automatic mode (the default): dangerous ops auto-approve, no server needed
+  const auto = await runHook(
+    { tool: 'Bash', input: { command: 'git push origin master' } },
+    { CCAPPROVAL_REMOTE_ACTION: 'allow', CCAPPROVAL_PORT: '14999' } // port with no server: must NOT hang
+  );
+  console.assert(auto.hookSpecificOutput.permissionDecision === 'allow', 'dangerous op should auto-allow');
+  console.assert(/dangerous op/.test(auto.hookSpecificOutput.permissionDecisionReason), 'reason');
+  console.log('✔ fully-automatic mode (git push auto-approved)');
 
   process.exit(0);
 })().catch(e => { console.error('✘ e2e failed:', e.message); process.exit(1); });

@@ -24,6 +24,7 @@ const DEFAULTS = {
   pollMs: 1000,              // decision poll interval
   fallback: 'ask',           // what to do on timeout: 'ask' | 'deny' | 'allow'
   unmatchedDefault: 'allow', // no rule matched: 'allow' (autonomous) | 'remote' (review everything unknown)
+  remoteAction: 'allow',     // dangerous-but-not-forbidden ops: 'allow' (fully automatic) | 'remote' (human approval)
   dataDir: HOME_DIR,
   historyLimit: 200,
   notify: {
@@ -63,6 +64,7 @@ function loadConfig() {
   if (process.env.CCAPPROVAL_FALLBACK) cfg.fallback = process.env.CCAPPROVAL_FALLBACK;
   if (process.env.CCAPPROVAL_DATA_DIR) cfg.dataDir = process.env.CCAPPROVAL_DATA_DIR;
   if (process.env.CCAPPROVAL_UNMATCHED) cfg.unmatchedDefault = process.env.CCAPPROVAL_UNMATCHED;
+  if (process.env.CCAPPROVAL_REMOTE_ACTION) cfg.remoteAction = process.env.CCAPPROVAL_REMOTE_ACTION;
 
   fs.mkdirSync(cfg.dataDir, { recursive: true });
 

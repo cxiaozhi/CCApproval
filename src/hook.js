@@ -138,17 +138,30 @@ async function waitForDecision(id) {
   const { verdict, reason } = evaluate(toolName, toolInput, cfg.rules, cfg.unmatchedDefault);
   log(`${toolName} → ${verdict} (${reason}) :: ${summary.slice(0, 200)}`);
 
-  if (verdict === 'allow' || verdict === 'deny') {
-    // record locally so the dashboard 最近记录 shows auto decisions too
+  // record locally so the dashboard 最近记录 shows auto decisions too
+  const audit = (status, note) => {
     try {
       const rec = store.createRequest({
-        toolName, toolInput: trimInput(toolInput), summary, reason,
+        toolName, toolInput: trimInput(toolInput), summary, reason: note,
         cwd: payload.cwd, sessionId: payload.session_id
       });
-      store.markStatus(rec.id, verdict === 'allow' ? 'auto-approved' : 'policy-denied', { reason });
+      store.markStatus(rec.id, status, { reason: note });
     } catch { /* auditing must never block the decision */ }
+  };
+
+  if (verdict === 'allow' || verdict === 'deny') {
+    const status = verdict === 'allow' ? 'auto-approved' : 'policy-denied';
+    audit(status, reason);
     if (verdict === 'allow') return answer('allow', `ccapproval auto-allow: ${reason}`);
     return answer('deny', `ccapproval policy deny: ${reason}`);
+  }
+
+  // fully-automatic mode: dangerous-but-not-forbidden ops are approved instantly,
+  // no human in the loop (remoteAction: 'allow' — the default)
+  if (cfg.remoteAction === 'allow') {
+    log(`${toolName} dangerous op auto-approved (${reason})`);
+    audit('auto-approved', `dangerous op auto-approved: ${reason}`);
+    return answer('allow', `ccapproval auto-allow (dangerous op): ${reason}`);
   }
 
   // remote approval
