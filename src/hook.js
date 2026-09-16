@@ -29,6 +29,18 @@ const cfg = loadConfig();
 const store = new Store(cfg.dataDir, cfg.historyLimit);
 const LOG = path.join(cfg.dataDir, 'hook.log');
 
+/** Trim oversized tool_input before persisting (audit records stay small). */
+function trimInput(input) {
+  try {
+    if (JSON.stringify(input).length <= 4000) return input;
+    const out = {};
+    for (const [k, v] of Object.entries(input || {})) {
+      out[k] = typeof v === 'string' && v.length > 1000 ? v.slice(0, 1000) + `…[truncated ${v.length} chars]` : v;
+    }
+    return out;
+  } catch { return {}; }
+}
+
 function log(msg) {
   try { fs.appendFileSync(LOG, `[${new Date().toISOString()}] ${msg}\n`); } catch { /* ignore */ }
 }
@@ -126,8 +138,18 @@ async function waitForDecision(id) {
   const { verdict, reason } = evaluate(toolName, toolInput, cfg.rules, cfg.unmatchedDefault);
   log(`${toolName} → ${verdict} (${reason}) :: ${summary.slice(0, 200)}`);
 
-  if (verdict === 'allow') return answer('allow', `ccapproval auto-allow: ${reason}`);
-  if (verdict === 'deny') return answer('deny', `ccapproval policy deny: ${reason}`);
+  if (verdict === 'allow' || verdict === 'deny') {
+    // record locally so the dashboard 最近记录 shows auto decisions too
+    try {
+      const rec = store.createRequest({
+        toolName, toolInput: trimInput(toolInput), summary, reason,
+        cwd: payload.cwd, sessionId: payload.session_id
+      });
+      store.markStatus(rec.id, verdict === 'allow' ? 'auto-approved' : 'policy-denied', { reason });
+    } catch { /* auditing must never block the decision */ }
+    if (verdict === 'allow') return answer('allow', `ccapproval auto-allow: ${reason}`);
+    return answer('deny', `ccapproval policy deny: ${reason}`);
+  }
 
   // remote approval
   const record = {

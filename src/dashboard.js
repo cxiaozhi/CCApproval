@@ -58,7 +58,7 @@ function renderDashboard(store, cfg) {
   .ok{background:#1a7f37;color:#fff} .no{background:#cf222e;color:#fff}
   table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}
   td,th{border-bottom:1px solid #eee;padding:6px;text-align:left}
-  .approved{color:#1a7f37} .denied{color:#cf222e} .expired,.timeout{color:#888}
+  .approved,.auto-approved{color:#1a7f37} .denied,.policy-denied{color:#cf222e} .expired,.timeout{color:#888}
   #refresh{float:right;font-size:13px}
 </style></head><body>
 <h1>🔐 CCApproval <span class="muted">Claude Code 远程审批</span></h1>
