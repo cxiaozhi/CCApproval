@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|PowerShell|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$",
+        "matcher": "^(Bash|PowerShell|Read|Glob|Grep|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$",
         "hooks": [
           {
             "type": "command",

@@ -30,7 +30,7 @@ const PERMISSION_CMD = `${HOOK_CMD} permission`;
  * listed; other MCP servers (session management and friends) keep their own
  * native prompts.
  */
-const MATCHER = '^(Bash|PowerShell|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$';
+const MATCHER = '^(Bash|PowerShell|Read|Glob|Grep|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$';
 
 const args = process.argv.slice(2);
 const global_ = args.includes('--global');

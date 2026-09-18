@@ -35,18 +35,23 @@ Claude Code 工具调用
 
 | 事件 | 覆盖的工具 | 说明 |
 |---|---|---|
-| `PreToolUse` | `Bash` `PowerShell` `Write` `Edit` `NotebookEdit` `WebFetch` `Agent` `ExitPlanMode` `mcp__Claude_Browser__.*` | 走策略引擎判定 |
+| `PreToolUse` | `Bash` `PowerShell` `Read` `Glob` `Grep` `Write` `Edit` `NotebookEdit` `WebFetch` `Agent` `ExitPlanMode` `mcp__Claude_Browser__.*` | 走策略引擎判定 |
 | `PermissionRequest` | `ExitPlanMode` | 计划审批走的是这个事件而不是 PreToolUse，所以必须单独注册一条 |
 
 `Bash` 和 `PowerShell` 共用同一套命令规则，判定完全一致。
 
+`Read` / `Glob` / `Grep` 也在覆盖范围内——**读取工作目录之外的文件**（就是"Path is outside allowed working directories"那个弹窗）实测能被 hook 放行掉，不再弹窗。
+
 浏览器预览类的 MCP 工具（起服务、截图、点击…）会一起纳入。**其余 MCP 服务器故意没有覆盖**——会话管理那类工具里有 `delete_session`、`archive_session` 这种破坏性操作，保持原生弹窗更稳妥。想让它们也自动放行，把 `install.js` 里的 `mcp__Claude_Browser__.*` 改成 `mcp__.*` 重新注册即可。
+
+> 注册分两层：`node install.js` 写项目级 `./.claude/settings.json`，`node install.js --global` 写 `~/.claude/settings.json`。**没有项目级注册的目录会用全局那份**，所以改了 matcher 记得两边都跑一次，否则别的项目还在用旧配置。
 
 ### hook 拦不住的
 
 以下几类是 Claude Code 应用层的"永远询问"动作，**任何 hook、任何权限模式都压不掉**，只能手动点：
 
 - 启动 dev server —— 就是 `launch.json` 里配置的那个"允许启动 xxx？"。实测：hook **能看到并且已经放行**这个调用（日志里是 `mcp__Claude_Browser__preview_start → allow`），但应用层这个弹窗不认 hook 的决定，照样会弹。真要绕开它，就别用 `launch.json`，直接用命令起（`npm run launch` 走的是 Bash，hook 能接管）
+- 写入 `.claude/settings.json` —— Claude Code 不允许 agent 静默改写自己的权限配置。实测：hook 已经放行该命令（日志里是 `Bash → allow`），弹窗照样出现，而且全局开着 `bypassPermissions` 也照样弹。**这道门拦不住是应该的**：如果 hook 能自动批准改写权限配置，被约束的一方就能自己解除约束了。所以 `node install.js` 重新注册时总会弹一次，属正常
 - 归档 / 删除会话
 - `AskUserQuestion` 这类必须交互的工具
 - 命中 managed deny 列表的操作（hook 只能收紧权限，不能放宽）
