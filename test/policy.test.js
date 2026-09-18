@@ -35,6 +35,15 @@ const cases = [
   ['PowerShell', { command: 'Remove-Item -Recurse build' }, 'ask'],
   ['PowerShell', { command: 'git push origin main' }, 'ask'],
   ['PowerShell', { command: 'Stop-Computer' }, 'ask'],
+  // deny rules anchor at a command position: chained forms still hard-deny, but the
+  // same command merely *quoted* in a commit message or an echo does not. Regression:
+  // an unanchored rule blocked a git commit whose message mentioned such a command.
+  ['Bash', { command: 'cd /tmp && rm -rf /' }, 'deny'],
+  ['Bash', { command: 'ls; rm -rf /' }, 'deny'],
+  ['Bash', { command: 'sudo rm -rf /' }, 'deny'],
+  ['Bash', { command: 'rm -rf /*' }, 'deny'],
+  ['Bash', { command: 'git commit -m "fix rm -rf / handling"' }, 'ask'],
+  ['Bash', { command: 'echo "rm -rf /"' }, 'ask'],
   // plan proposals are allowed outright
   ['ExitPlanMode', { plan: 'do the thing' }, 'allow'],
 ];

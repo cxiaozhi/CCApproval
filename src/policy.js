@@ -25,10 +25,18 @@
  */
 const SHELL_TOOLS = '^(Bash|PowerShell)$';
 
+/**
+ * A command position: the start of the string, right after a separator, or right
+ * after a shell keyword. Deny rules anchor here, so a dangerous command that is
+ * merely *quoted* — in a commit message, an echo, a doc file — doesn't trip them.
+ * Only deny rules anchor; ask/allow rules still scan the whole string.
+ */
+const CMD_POS = '(?:^|[;&|()\\n]|\\b(?:then|do|else)\\b)\\s*(?:sudo\\s+|doas\\s+)*';
+
 const DEFAULT_RULES = {
   deny: [
-    { tool: SHELL_TOOLS, command: '\\b(mkfs|dd\\s+if=|:\\(\\)\\s*\\{)', reason: 'destructive system command' },
-    { tool: SHELL_TOOLS, command: '(rm|del|Remove-Item).*(\\s/\\s*$|\\s/\\*|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' }
+    { tool: SHELL_TOOLS, command: CMD_POS + '(mkfs|dd\\s+if=|:\\(\\)\\s*\\{)', reason: 'destructive system command' },
+    { tool: SHELL_TOOLS, command: CMD_POS + '(rm|del|Remove-Item)\\b[^;&|]*(\\s/\\s*$|\\s/\\*|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' }
   ],
   ask: [
     { tool: SHELL_TOOLS, command: '\\b(rm|del|rmdir|Remove-Item|shred)\\b', reason: 'file deletion' },

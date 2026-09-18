@@ -106,6 +106,8 @@ node install.js             # 注册到 ./.claude/settings.json；--global 对�
 
 判定顺序：**deny → ask → allow → 默认值**。你自己写的规则排在内置规则前面。
 
+> 内置 deny 规则只在**命令位置**匹配——命令开头，或 `;` `&&` `|` `(` `then` `do` 之后。所以提交信息、`echo`、文档里只是**引用**一条危险命令时不会被硬拒（deny 是无条件拒绝，误报没法补救）。ask / allow 规则仍然扫描整串。
+
 内置 ask（危险，默认自动放行）：文件删除、`git push/reset --hard`、包发布、`kubectl/terraform` 变更、`curl|bash`、关机等。
 内置 deny（灾难，永远拒绝）：`rm -rf /`、删 Windows 系统目录、`mkfs` 等。
 
