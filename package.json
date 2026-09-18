@@ -1,7 +1,7 @@
 {
   "name": "ccapproval",
   "version": "1.0.0",
-  "description": "Automatic approval guard for Claude Code: auto-approve safe tool calls, auto-deny catastrophic ones, and log every decision. No human in the loop.",
+  "description": "Whitelist approval guard for Claude Code: auto-approve everything that is not on the escalate list, hand the rest to Claude Code's own prompt, and log every decision. No human in the loop.",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -10,11 +10,17 @@
     "stop": "node scripts/stop.js",
     "hook": "node src/hook.js",
     "install-hook": "node install.js",
-    "test": "node test/policy.test.js && node test/e2e.test.js"
+    "icon": "node scripts/icon.js",
+    "setup-3p": "node scripts/setup-3p.js",
+    "test": "node test/redact.test.js && node test/policy.test.js && node test/install.test.js && node test/e2e.test.js && node test/gateway.test.js && node test/bridge.test.js && node test/icon.test.js"
   },
   "bin": {
     "ccapproval": "src/server.js",
     "ccapproval-hook": "src/hook.js"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.4"
+  }
 }

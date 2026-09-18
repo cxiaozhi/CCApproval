@@ -1,24 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash",
+      "PowerShell"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|PowerShell|Read|Glob|Grep|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$",
+        "matcher": ".*",
         "hooks": [
           {
             "type": "command",
             "command": "node F:/workspace/CCApproval/src/hook.js",
-            "timeout": 30
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node F:/workspace/CCApproval/src/hook.js permission",
             "timeout": 30
           }
         ]

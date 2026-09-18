@@ -1,18 +1,20 @@
 {
   "port": 4317,
   "host": "127.0.0.1",
-  "unmatchedDefault": "allow",
-  "dangerousDefault": "allow",
   "historyLimit": 10,
+  "gateway": {
+    "enabled": false,
+    "port": 15721,
+    "host": "127.0.0.1",
+    "upstream": "http://192.168.1.10:3000",
+    "apiKey": "sk-your-upstream-key",
+    "modelMap": {
+      "claude-sonnet-5": "deepseek-v4.1-flash",
+      "claude-haiku-4-5": "gpt-5.6-sol"
+    },
+    "openaiOnlyModels": []
+  },
   "rules": {
-    "deny": [
-      { "tool": "Bash", "command": "rm -rf\\s+~", "reason": "deleting home directory" }
-    ],
-    "ask": [
-      { "tool": "Write|Edit|MultiEdit", "path": "\\.(env|pem|key)$", "reason": "modifying secrets file" }
-    ],
-    "allow": [
-      { "tool": "Bash", "command": "^\\s*git\\s+add\\b", "reason": "staging is safe" }
-    ]
+    "escalate": []
   }
 }

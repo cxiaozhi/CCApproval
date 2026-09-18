@@ -18,7 +18,7 @@ hook.on('close', () => {
   const ok = d.permissionDecision === 'allow'
     && /auto-/.test(d.permissionDecisionReason)
     && elapsed < BUDGET_MS;
-  console.log(ok ? '✔ 截图中的命令现在直接自动放行，无需任何点击和等待' : '✘ 未自动放行或耗时过长');
+  console.log(ok ? '✔ 截图中的命令现在直接自动审批，无需任何点击和等待' : '✘ 未自动审批或耗时过长');
   process.exit(ok ? 0 : 1);
 });
 hook.stdin.end(JSON.stringify({

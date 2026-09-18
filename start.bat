@@ -15,7 +15,9 @@ if errorlevel 1 (
 
 if not exist node_modules (
   echo [CCApproval] First run - installing dependencies...
-  call npm install --no-fund --no-audit
+  rem --omit=dev: the devDependencies only exist to regenerate the icons
+  rem (npm run icon). A user just running the guard should not pull sharp down.
+  call npm install --omit=dev --no-fund --no-audit
   if errorlevel 1 ( echo [CCApproval] npm install failed. & pause & exit /b 1 )
 )
 

@@ -2,14 +2,24 @@
 /**
  * Policy engine: decides what to do with a Claude Code tool call.
  *
- * Verdicts (first match wins, order: deny > ask > allow > default):
- *   deny  — refuse immediately, no prompt
- *   allow — approve immediately, no prompt
- *   ask   — hand the call back to Claude Code's own permission prompt
+ * This is a whitelist, not a blacklist. There are exactly two outcomes:
  *
- * This project never asks a human itself; 'ask' means Claude Code decides.
- * The default for unmatched calls is 'allow' (fully autonomous mode) and can be
- * changed via config `unmatchedDefault: 'ask'` if you prefer to review unknowns.
+ *   escalate — the call is on the escalate list → hand it to Claude Code's own
+ *              permission prompt. This list is the *only* thing that can produce
+ *              a prompt.
+ *   allow    — everything else. Auto-approved, no prompt.
+ *
+ * So the question "will this bother me?" reduces to "is it in the escalate list?".
+ * Adding a rule there is the single lever; nothing else widens or narrows it.
+ *
+ * There is deliberately no `deny` tier. A hard refusal has no recovery path — a
+ * false positive cannot be clicked through — and the operations that would justify
+ * one are already un-approvable upstream: Claude Code refuses to auto-approve
+ * critical-path `rm` and writes to `.claude/**` whatever a hook answers. Escalating
+ * those reaches a prompt the user can still say yes to; denying them just removes
+ * the option.
+ *
+ * This project never asks a human itself; 'escalate' means Claude Code decides.
  *
  * Rule shape:
  *   { tool: 'Bash|Write|Edit',           // regex matched against tool name
@@ -27,32 +37,46 @@ const SHELL_TOOLS = '^(Bash|PowerShell)$';
 
 /**
  * A command position: the start of the string, right after a separator, or right
- * after a shell keyword. Deny rules anchor here, so a dangerous command that is
- * merely *quoted* — in a commit message, an echo, a doc file — doesn't trip them.
- * Only deny rules anchor; ask/allow rules still scan the whole string.
+ * after a shell keyword. The catastrophic-command rules anchor here, so a dangerous
+ * command that is merely *quoted* — in a commit message, an echo, a doc file —
+ * doesn't turn into a prompt.
  */
 const CMD_POS = '(?:^|[;&|()\\n]|\\b(?:then|do|else)\\b)\\s*(?:sudo\\s+|doas\\s+)*';
 
+/**
+ * Starter contents of the escalate list: the operations that cannot be undone.
+ * Everything here deletes a session, throws away uncommitted work, hands the agent
+ * more authority than the user gave it, or wipes the machine — worth one prompt
+ * each. Ordinary destructive shell work (rm -rf build, git push, package
+ * publishing) is deliberately NOT here: it is routine, and the guard's whole point
+ * is to stay out of the way.
+ */
+const DESTRUCTIVE_MCP = '^mcp__.*__(delete|clear|archive|discard|clean_up|detach|stop|set_session_permission_mode|set_auto_merge|set_remote_control)[a-z_]*$';
+
+/** Writing a credentials file: silently clobbering one is hard to notice and hard to undo. */
+const SECRET_FILE_TOOLS = '^(Write|Edit|NotebookEdit)$';
+const SECRET_FILE_PATH = '(^|[/\\\\])\\.env(\\.[a-z]+)?$|\\.(pem|key|p12|pfx|keystore)$';
+
+/**
+ * Tools whose entire purpose is to reach the human. Auto-approving one is
+ * self-defeating: the guard would be silencing the very dialog that exists to ask
+ * the user something. Worse, the dialog is rendered before the hook answers, so
+ * approving it makes the question appear and then vanish.
+ *
+ * This list is what defines a "real ask" — Claude Code hands the user something to
+ * fill in or submit, and only these reach that dialog:
+ *   AskUserQuestion — the questions/options form
+ *   ExitPlanMode    — the plan card, where the user approves or rejects the plan
+ */
+const USER_INTERACTION_TOOLS = '^(AskUserQuestion|ExitPlanMode)$';
+
 const DEFAULT_RULES = {
-  deny: [
+  escalate: [
+    { tool: USER_INTERACTION_TOOLS, reason: 'the tool itself asks the user' },
     { tool: SHELL_TOOLS, command: CMD_POS + '(mkfs|dd\\s+if=|:\\(\\)\\s*\\{)', reason: 'destructive system command' },
-    { tool: SHELL_TOOLS, command: CMD_POS + '(rm|del|Remove-Item)\\b[^;&|]*(\\s/\\s*$|\\s/\\*|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' }
-  ],
-  ask: [
-    { tool: SHELL_TOOLS, command: '\\b(rm|del|rmdir|Remove-Item|shred)\\b', reason: 'file deletion' },
-    { tool: SHELL_TOOLS, command: '\\bgit\\s+(push|reset\\s+--hard|clean\\s+-[fd])', reason: 'history-affecting git operation' },
-    { tool: SHELL_TOOLS, command: '\\b(npm|pnpm|yarn|pip)\\s+(publish|unpublish)\\b', reason: 'package publishing' },
-    { tool: SHELL_TOOLS, command: '\\b(kubectl|helm|terraform)\\s+(apply|delete|destroy)\\b', reason: 'infrastructure change' },
-    { tool: SHELL_TOOLS, command: '\\b(curl|wget|Invoke-WebRequest)\\b.*\\|\\s*(sh|bash|powershell)', reason: 'pipe-remote-script-to-shell' },
-    { tool: SHELL_TOOLS, command: '\\b(shutdown|reboot|Restart-Computer|Stop-Computer)\\b', reason: 'power operation' }
-  ],
-  allow: [
-    { tool: '^(Read|Glob|Grep|LS|TodoWrite|WebSearch|WebFetch|NotebookRead)$', reason: 'read-only tool' },
-    { tool: '^ExitPlanMode$', reason: 'plan proposal — nothing has been executed yet' },
-    { tool: SHELL_TOOLS, command: '^\\s*(ls|dir|pwd|cd|echo|cat|type|which|where|whoami|date)\\b[^&|;]*$', reason: 'read-only shell builtin (no chaining)' },
-    { tool: SHELL_TOOLS, command: '^\\s*git\\s+(status|diff|log|show|branch|fetch|blame|stash list)\\b', reason: 'read-only git' },
-    { tool: SHELL_TOOLS, command: '^\\s*(node|python|python3|npm|npx|pnpm|yarn|pip)\\s+[^&|;]*$', reason: 'local runtime/package command without shell chaining' },
-    { tool: SHELL_TOOLS, command: '^\\s*(mkdir|touch|cp|copy|mv|move|find|rg|grep|findstr)\\b', reason: 'common safe file/search op' }
+    { tool: SHELL_TOOLS, command: CMD_POS + '(rm|del|Remove-Item)\\b[^;&|]*(\\s/\\s*$|\\s/\\*|\\s~\\s*$|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' },
+    { tool: DESTRUCTIVE_MCP, reason: 'destructive MCP operation' },
+    { tool: SECRET_FILE_TOOLS, path: SECRET_FILE_PATH, reason: 'writing a credentials file' }
   ]
 };
 
@@ -102,36 +126,27 @@ function summarize(toolName, toolInput) {
 }
 
 /**
- * @param {string} unmatchedDefault verdict when no rule matches: 'allow' (default) or 'ask'
- * @returns {{verdict: 'allow'|'deny'|'ask', reason: string, matched: object|null,
- *            source: 'rule'|'builtin'|'unmatchedDefault'}}
- *   source distinguishes your own rules from the built-in dangerous patterns, so the
- *   caller can let an explicit `ask` rule win over the `dangerousDefault` switch.
+ * @returns {{verdict: 'allow'|'escalate', reason: string, matched: object|null,
+ *            source: 'rule'|'builtin'|'default'}}
+ *   source distinguishes your own rules from the built-in escalate list, so the log
+ *   can show whether a prompt was one you asked for or one shipped as a default.
  */
-function evaluate(toolName, toolInput, rules, unmatchedDefault = 'allow') {
-  // user rules precede built-ins within each tier, so index < userCount means "yours"
-  const tiers = [
-    ['deny', rules?.deny, DEFAULT_RULES.deny],
-    ['ask', rules?.ask, DEFAULT_RULES.ask],
-    ['allow', rules?.allow, DEFAULT_RULES.allow]
-  ];
-  for (const [verdict, userRules, builtinRules] of tiers) {
-    const mine = userRules || [];
-    const list = [...mine, ...builtinRules];
-    for (let i = 0; i < list.length; i++) {
-      if (matchRule(list[i], toolName, toolInput)) {
-        return {
-          verdict,
-          reason: list[i].reason || `matched ${verdict} rule`,
-          matched: list[i],
-          source: i < mine.length ? 'rule' : 'builtin'
-        };
-      }
+function evaluate(toolName, toolInput, rules) {
+  // user rules precede built-ins, so index < mine.length means "yours"
+  const mine = rules?.escalate || [];
+  const list = [...mine, ...DEFAULT_RULES.escalate];
+  for (let i = 0; i < list.length; i++) {
+    if (matchRule(list[i], toolName, toolInput)) {
+      return {
+        verdict: 'escalate',
+        reason: list[i].reason || 'matched an escalate rule',
+        matched: list[i],
+        source: i < mine.length ? 'rule' : 'builtin'
+      };
     }
   }
-  return unmatchedDefault === 'ask'
-    ? { verdict: 'ask', reason: 'no rule matched — handing to Claude Code', matched: null, source: 'unmatchedDefault' }
-    : { verdict: 'allow', reason: 'no dangerous pattern matched — auto-approved', matched: null, source: 'unmatchedDefault' };
+  // Not on the whitelist: approve without asking.
+  return { verdict: 'allow', reason: 'not on the escalate list', matched: null, source: 'default' };
 }
 
 module.exports = { evaluate, summarize, DEFAULT_RULES };

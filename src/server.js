@@ -11,6 +11,7 @@
  *   GET  /api/requests  recent entries as JSON
  *   GET  /api/fragment  log rows as an HTML fragment
  *   GET  /api/events    SSE stream — a `change` event whenever the log grows
+ *   GET  /favicon.{svg,ico} , /icon-{180,512}.png   the app mark (no token: see below)
  */
 const http = require('http');
 const fs = require('fs');
@@ -18,9 +19,12 @@ const path = require('path');
 const { loadConfig } = require('./config');
 const { Store } = require('./store');
 const { renderDashboard, renderRows } = require('./dashboard');
+const { startGateway, getGatewayState } = require('./gateway');
+const { iconFor } = require('./icon');
 
 const cfg = loadConfig();
 const store = new Store(cfg.dataDir);
+startGateway(cfg); // loopback inference proxy for Claude Desktop 3p mode (no-op when disabled)
 
 function authed(req, url) {
   if (url.searchParams.get('t') === cfg.secret) return true;
@@ -82,10 +86,24 @@ const server = http.createServer((req, res) => {
   const path = url.pathname;
 
   try {
+    // Icons answer before the token check. A <link rel=icon> — and the mark in the
+    // panel's own <h1> — is a page-relative GET that cannot carry ?t=, so gating
+    // them would only ever put a broken-image default in the tab. They read no log
+    // data, so there is nothing to protect.
+    const icon = iconFor(path);
+    if (icon && (req.method === 'GET' || req.method === 'HEAD')) {
+      res.writeHead(200, {
+        'Content-Type': icon.contentType,
+        'Content-Length': icon.body.length,
+        'Cache-Control': 'public, max-age=86400'
+      });
+      return res.end(req.method === 'HEAD' ? undefined : icon.body);
+    }
+
     if (!authed(req, url)) return json(res, 401, { error: 'unauthorized — append ?t=<secret>' });
 
     if (path === '/' && req.method === 'GET') {
-      return html(res, 200, renderDashboard(store, cfg));
+      return html(res, 200, renderDashboard(store, cfg, getGatewayState()));
     }
     if (path === '/api/events' && req.method === 'GET') {
       res.writeHead(200, {
