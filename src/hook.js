@@ -1,32 +1,35 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * CCApproval PreToolUse hook for Claude Code.
+ * CCApproval hook for Claude Code. Two modes, both registered in
+ * .claude/settings.json (see install.js):
  *
- * Register in .claude/settings.json (see install.js). Claude Code pipes a JSON
- * payload on stdin:
- *   { session_id, cwd, tool_name, tool_input, ... }
- * and expects a JSON decision on stdout:
- *   { hookSpecificOutput: { hookEventName: 'PreToolUse',
- *       permissionDecision: 'allow'|'deny'|'ask',
- *       permissionDecisionReason: '...', updatedInput?: {...} } }
+ *   node hook.js              PreToolUse — every tool call
+ *   node hook.js permission   PermissionRequest — scoped to ExitPlanMode
  *
- * Flow:
- *   1. evaluate policy locally
- *   2. allow/deny → answer immediately
- *   3. remote → (re)start server if needed, POST request, poll decision file,
- *      on timeout fall back to cfg.fallback (default 'ask' = normal CC prompt)
+ * Claude Code pipes a JSON payload on stdin ({ session_id, cwd, tool_name,
+ * tool_input, ... }) and expects a decision on stdout:
+ *   PreToolUse        { hookSpecificOutput: { hookEventName: 'PreToolUse',
+ *                         permissionDecision: 'allow'|'deny'|'ask',
+ *                         permissionDecisionReason: '...' } }
+ *   PermissionRequest { hookSpecificOutput: { hookEventName: 'PermissionRequest',
+ *                         decision: { behavior: 'allow'|'deny' } } }
+ *
+ * Everything is local: evaluate the policy, answer, append one audit line.
+ * No server, no network, no waiting. A call the policy can't settle is handed
+ * back to Claude Code's own permission prompt via 'ask' — this project never
+ * asks a human itself.
  */
-const http = require('http');
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { loadConfig } = require('./config');
 const { Store } = require('./store');
 const { evaluate, summarize } = require('./policy');
 
+const MODE = process.argv[2] === 'permission' ? 'permission' : 'preToolUse';
+
 const cfg = loadConfig();
-const store = new Store(cfg.dataDir, cfg.historyLimit);
+const store = new Store(cfg.dataDir);
 const LOG = path.join(cfg.dataDir, 'hook.log');
 
 /** Trim oversized tool_input before persisting (audit records stay small). */
@@ -57,6 +60,13 @@ function answer(decision, reason, updatedInput) {
   process.stdout.write(JSON.stringify(out));
 }
 
+/** PermissionRequest events answer with a decision object instead of a permissionDecision. */
+function permissionAnswer(behavior) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior } }
+  }));
+}
+
 function readStdin() {
   return new Promise(resolve => {
     let data = '';
@@ -69,137 +79,74 @@ function readStdin() {
   });
 }
 
-function pingServer() {
-  return new Promise(resolve => {
-    const req = http.request({
-      host: '127.0.0.1', port: cfg.port, path: '/api/requests', method: 'GET',
-      headers: { Authorization: `Bearer ${cfg.secret}` }, timeout: 1500
-    }, res => { res.resume(); resolve(res.statusCode === 200); });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.end();
-  });
-}
-
-async function ensureServer() {
-  if (await pingServer()) return true;
-  log('server not running — spawning detached');
-  const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
-    detached: true,
-    stdio: ['ignore', fs.openSync(path.join(cfg.dataDir, 'server.out.log'), 'a'), fs.openSync(path.join(cfg.dataDir, 'server.err.log'), 'a')],
-    windowsHide: true
-  });
-  child.unref();
-  // wait for it to come up
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 300));
-    if (await pingServer()) return true;
-  }
-  return false;
-}
-
-function postRequest(record) {
-  return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(record);
-    const req = http.request({
-      host: '127.0.0.1', port: cfg.port, path: '/api/requests', method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
-      timeout: 5000
-    }, res => {
-      let body = '';
-      res.on('data', c => (body += c));
-      res.on('end', () => {
-        try { resolve(JSON.parse(body)); } catch { reject(new Error('bad response: ' + body)); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    req.write(payload);
-    req.end();
-  });
-}
-
-async function waitForDecision(id) {
-  const deadline = Date.now() + cfg.timeoutMs;
-  while (Date.now() < deadline) {
-    const d = store.getDecision(id);
-    if (d) return d;
-    await new Promise(r => setTimeout(r, cfg.pollMs));
-  }
-  return null;
-}
-
 (async () => {
   const payload = await readStdin();
+
+  // A payload we could not parse has no tool_name — broken stdin, truncated JSON,
+  // or a schema we don't know. Guessing 'allow' there would auto-approve whatever
+  // Claude Code was about to run, so fail closed instead.
+  if (!payload.tool_name) {
+    log('unreadable payload — failing closed');
+    if (MODE === 'permission') return; // no output → Claude Code shows its own prompt
+    return answer('ask', 'ccapproval: unreadable hook payload — asking directly');
+  }
+
+  // PermissionRequest. The matcher scopes this entry to ExitPlanMode, so approval
+  // is unconditional: a plan is a proposal, not an action, and the tool calls that
+  // actually mutate anything still go through the policy engine below.
+  if (MODE === 'permission') {
+    const toolName = payload.tool_name;
+    const toolInput = payload.tool_input || {};
+    log(`${toolName} → plan auto-accepted (PermissionRequest)`);
+    store.record({
+      id: store.newId(), status: 'auto-approved',
+      toolName, toolInput: trimInput(toolInput), summary: summarize(toolName, toolInput),
+      reason: 'plan proposal auto-accepted', verdict: 'allow', source: 'planMode',
+      cwd: payload.cwd, sessionId: payload.session_id
+    });
+    return permissionAnswer('allow');
+  }
+
   const toolName = payload.tool_name || '';
   const toolInput = payload.tool_input || {};
   const summary = summarize(toolName, toolInput);
 
-  const { verdict, reason } = evaluate(toolName, toolInput, cfg.rules, cfg.unmatchedDefault);
+  const { verdict, reason, source } = evaluate(toolName, toolInput, cfg.rules, cfg.unmatchedDefault);
   log(`${toolName} → ${verdict} (${reason}) :: ${summary.slice(0, 200)}`);
 
-  // record locally so the dashboard 最近记录 shows auto decisions too
-  const audit = (status, note) => {
-    try {
-      const rec = store.createRequest({
-        toolName, toolInput: trimInput(toolInput), summary, reason: note,
-        cwd: payload.cwd, sessionId: payload.session_id
-      });
-      store.markStatus(rec.id, status, { reason: note });
-    } catch { /* auditing must never block the decision */ }
-  };
+  // One audit line per call, whatever the outcome. `escalated` is the row that
+  // shows what the policy gave up on and Claude Code had to prompt for.
+  const audit = (status, note, src = source) => store.record({
+    id: store.newId(), status,
+    toolName, toolInput: trimInput(toolInput), summary,
+    reason: note, verdict, source: src,
+    cwd: payload.cwd, sessionId: payload.session_id
+  });
 
-  if (verdict === 'allow' || verdict === 'deny') {
-    const status = verdict === 'allow' ? 'auto-approved' : 'policy-denied';
-    audit(status, reason);
-    if (verdict === 'allow') return answer('allow', `ccapproval auto-allow: ${reason}`);
+  if (verdict === 'deny') {
+    audit('policy-denied', reason);
     return answer('deny', `ccapproval policy deny: ${reason}`);
   }
+  if (verdict === 'allow') {
+    audit('auto-approved', reason);
+    return answer('allow', `ccapproval auto-allow: ${reason}`);
+  }
 
-  // fully-automatic mode: dangerous-but-not-forbidden ops are approved instantly,
-  // no human in the loop (remoteAction: 'allow' — the default)
-  if (cfg.remoteAction === 'allow') {
+  // verdict === 'ask', reached three ways:
+  //   your own `ask` rule matched      → always hand over (explicit config beats the switch)
+  //   a built-in dangerous pattern     → dangerousDefault decides
+  //   nothing matched, unmatchedDefault === 'ask' → always hand over
+  if (source === 'builtin' && cfg.dangerousDefault === 'allow') {
     log(`${toolName} dangerous op auto-approved (${reason})`);
-    audit('auto-approved', `dangerous op auto-approved: ${reason}`);
+    audit('auto-approved', `dangerous op auto-approved: ${reason}`, 'dangerousDefault');
     return answer('allow', `ccapproval auto-allow (dangerous op): ${reason}`);
   }
-
-  // remote approval
-  const record = {
-    toolName, toolInput, summary, reason,
-    cwd: payload.cwd, sessionId: payload.session_id,
-    transcriptPath: payload.transcript_path
-  };
-
-  let id = null;
-  try {
-    if (await ensureServer()) {
-      const res = await postRequest(record);
-      id = res.id;
-    } else {
-      log('server unavailable — falling back');
-    }
-  } catch (e) {
-    log('request post failed: ' + e.message);
-  }
-
-  if (!id) {
-    return answer(cfg.fallback, `ccapproval server unreachable — ${cfg.fallback}`);
-  }
-
-  log(`waiting for remote decision on ${id} (timeout ${cfg.timeoutMs}ms)`);
-  const decision = await waitForDecision(id);
-
-  if (!decision) {
-    store.markStatus(id, 'timeout');
-    return answer(cfg.fallback, `ccapproval: no response within ${Math.round(cfg.timeoutMs / 1000)}s — ${cfg.fallback}`);
-  }
-  if (decision.action === 'allow') {
-    return answer('allow', `ccapproval: approved remotely${decision.reason ? ' (' + decision.reason + ')' : ''}`, decision.updatedInput);
-  }
-  return answer('deny', `ccapproval: denied remotely${decision.reason ? ' (' + decision.reason + ')' : ''}`);
+  audit('escalated', reason);
+  return answer('ask', `ccapproval: handing to Claude Code — ${reason}`);
 })().catch(e => {
   log('fatal: ' + (e.stack || e.message));
-  // never block the user on hook failure
-  answer('ask', 'ccapproval hook error — asking user directly');
+  // never block the user on hook failure: PreToolUse falls back to 'ask',
+  // PermissionRequest emits nothing so Claude Code shows its own prompt
+  if (MODE === 'permission') return;
+  answer('ask', 'ccapproval hook error — asking directly');
 });

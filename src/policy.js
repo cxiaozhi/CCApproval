@@ -2,12 +2,14 @@
 /**
  * Policy engine: decides what to do with a Claude Code tool call.
  *
- * Verdicts (first match wins, order: deny > remote > allow > default):
+ * Verdicts (first match wins, order: deny > ask > allow > default):
+ *   deny  — refuse immediately, no prompt
+ *   allow — approve immediately, no prompt
+ *   ask   — hand the call back to Claude Code's own permission prompt
+ *
+ * This project never asks a human itself; 'ask' means Claude Code decides.
  * The default for unmatched calls is 'allow' (fully autonomous mode) and can be
- * changed via config `unmatchedDefault: 'remote'` if you prefer to review unknowns.
- *   deny   — refuse immediately, no prompt
- *   allow  — approve immediately, no prompt
- *   remote — ask the human via email/web dashboard
+ * changed via config `unmatchedDefault: 'ask'` if you prefer to review unknowns.
  *
  * Rule shape:
  *   { tool: 'Bash|Write|Edit',           // regex matched against tool name
@@ -16,25 +18,33 @@
  *     pattern: 'regex',                  // matched against the full JSON input (catch-all)
  *     reason: 'why this rule exists' }
  */
+/**
+ * Rules carrying a `command` match both shells. Keyed on the tool name, so a
+ * shell missing from this list bypasses every command rule — PowerShell used to
+ * fall straight through to the unmatched default.
+ */
+const SHELL_TOOLS = '^(Bash|PowerShell)$';
+
 const DEFAULT_RULES = {
   deny: [
-    { tool: 'Bash', command: '\\b(mkfs|dd\\s+if=|:\\(\\)\\s*\\{)', reason: 'destructive system command' },
-    { tool: 'Bash', command: '(rm|del|Remove-Item).*(\\s/\\s*$|\\s/\\*|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' }
+    { tool: SHELL_TOOLS, command: '\\b(mkfs|dd\\s+if=|:\\(\\)\\s*\\{)', reason: 'destructive system command' },
+    { tool: SHELL_TOOLS, command: '(rm|del|Remove-Item).*(\\s/\\s*$|\\s/\\*|C:\\\\?$|C:\\\\Windows)', reason: 'delete of a critical/root path' }
   ],
-  remote: [
-    { tool: 'Bash', command: '\\b(rm|del|rmdir|Remove-Item|shred)\\b', reason: 'file deletion' },
-    { tool: 'Bash', command: '\\bgit\\s+(push|reset\\s+--hard|clean\\s+-[fd])', reason: 'history-affecting git operation' },
-    { tool: 'Bash', command: '\\b(npm|pnpm|yarn|pip)\\s+(publish|unpublish)\\b', reason: 'package publishing' },
-    { tool: 'Bash', command: '\\b(kubectl|helm|terraform)\\s+(apply|delete|destroy)\\b', reason: 'infrastructure change' },
-    { tool: 'Bash', command: '\\b(curl|wget|Invoke-WebRequest)\\b.*\\|\\s*(sh|bash|powershell)', reason: 'pipe-remote-script-to-shell' },
-    { tool: 'Bash', command: '\\b(shutdown|reboot|Restart-Computer|Stop-Computer)\\b', reason: 'power operation' }
+  ask: [
+    { tool: SHELL_TOOLS, command: '\\b(rm|del|rmdir|Remove-Item|shred)\\b', reason: 'file deletion' },
+    { tool: SHELL_TOOLS, command: '\\bgit\\s+(push|reset\\s+--hard|clean\\s+-[fd])', reason: 'history-affecting git operation' },
+    { tool: SHELL_TOOLS, command: '\\b(npm|pnpm|yarn|pip)\\s+(publish|unpublish)\\b', reason: 'package publishing' },
+    { tool: SHELL_TOOLS, command: '\\b(kubectl|helm|terraform)\\s+(apply|delete|destroy)\\b', reason: 'infrastructure change' },
+    { tool: SHELL_TOOLS, command: '\\b(curl|wget|Invoke-WebRequest)\\b.*\\|\\s*(sh|bash|powershell)', reason: 'pipe-remote-script-to-shell' },
+    { tool: SHELL_TOOLS, command: '\\b(shutdown|reboot|Restart-Computer|Stop-Computer)\\b', reason: 'power operation' }
   ],
   allow: [
     { tool: '^(Read|Glob|Grep|LS|TodoWrite|WebSearch|WebFetch|NotebookRead)$', reason: 'read-only tool' },
-    { tool: 'Bash', command: '^\\s*(ls|dir|pwd|cd|echo|cat|type|which|where|whoami|date)\\b[^&|;]*$', reason: 'read-only shell builtin (no chaining)' },
-    { tool: 'Bash', command: '^\\s*git\\s+(status|diff|log|show|branch|fetch|blame|stash list)\\b', reason: 'read-only git' },
-    { tool: 'Bash', command: '^\\s*(node|python|python3|npm|npx|pnpm|yarn|pip)\\s+[^&|;]*$', reason: 'local runtime/package command without shell chaining' },
-    { tool: 'Bash', command: '^\\s*(mkdir|touch|cp|copy|mv|move|find|rg|grep|findstr)\\b', reason: 'common safe file/search op' }
+    { tool: '^ExitPlanMode$', reason: 'plan proposal — nothing has been executed yet' },
+    { tool: SHELL_TOOLS, command: '^\\s*(ls|dir|pwd|cd|echo|cat|type|which|where|whoami|date)\\b[^&|;]*$', reason: 'read-only shell builtin (no chaining)' },
+    { tool: SHELL_TOOLS, command: '^\\s*git\\s+(status|diff|log|show|branch|fetch|blame|stash list)\\b', reason: 'read-only git' },
+    { tool: SHELL_TOOLS, command: '^\\s*(node|python|python3|npm|npx|pnpm|yarn|pip)\\s+[^&|;]*$', reason: 'local runtime/package command without shell chaining' },
+    { tool: SHELL_TOOLS, command: '^\\s*(mkdir|touch|cp|copy|mv|move|find|rg|grep|findstr)\\b', reason: 'common safe file/search op' }
   ]
 };
 
@@ -84,25 +94,36 @@ function summarize(toolName, toolInput) {
 }
 
 /**
- * @param {string} unmatchedDefault verdict when no rule matches: 'allow' (default) or 'remote'
- * @returns {{verdict: 'allow'|'deny'|'remote', reason: string, matched: object|null}}
+ * @param {string} unmatchedDefault verdict when no rule matches: 'allow' (default) or 'ask'
+ * @returns {{verdict: 'allow'|'deny'|'ask', reason: string, matched: object|null,
+ *            source: 'rule'|'builtin'|'unmatchedDefault'}}
+ *   source distinguishes your own rules from the built-in dangerous patterns, so the
+ *   caller can let an explicit `ask` rule win over the `dangerousDefault` switch.
  */
 function evaluate(toolName, toolInput, rules, unmatchedDefault = 'allow') {
-  const merged = {
-    deny: [...DEFAULT_RULES.deny, ...(rules?.deny || [])],
-    remote: [...(rules?.remote || []), ...DEFAULT_RULES.remote], // user remote rules take precedence
-    allow: [...(rules?.allow || []), ...DEFAULT_RULES.allow]
-  };
-  for (const [verdict, list] of [['deny', merged.deny], ['remote', merged.remote], ['allow', merged.allow]]) {
-    for (const rule of list) {
-      if (matchRule(rule, toolName, toolInput)) {
-        return { verdict, reason: rule.reason || `matched ${verdict} rule`, matched: rule };
+  // user rules precede built-ins within each tier, so index < userCount means "yours"
+  const tiers = [
+    ['deny', rules?.deny, DEFAULT_RULES.deny],
+    ['ask', rules?.ask, DEFAULT_RULES.ask],
+    ['allow', rules?.allow, DEFAULT_RULES.allow]
+  ];
+  for (const [verdict, userRules, builtinRules] of tiers) {
+    const mine = userRules || [];
+    const list = [...mine, ...builtinRules];
+    for (let i = 0; i < list.length; i++) {
+      if (matchRule(list[i], toolName, toolInput)) {
+        return {
+          verdict,
+          reason: list[i].reason || `matched ${verdict} rule`,
+          matched: list[i],
+          source: i < mine.length ? 'rule' : 'builtin'
+        };
       }
     }
   }
-  return unmatchedDefault === 'remote'
-    ? { verdict: 'remote', reason: 'no rule matched — requires human review', matched: null }
-    : { verdict: 'allow', reason: 'no dangerous pattern matched — auto-approved', matched: null };
+  return unmatchedDefault === 'ask'
+    ? { verdict: 'ask', reason: 'no rule matched — handing to Claude Code', matched: null, source: 'unmatchedDefault' }
+    : { verdict: 'allow', reason: 'no dangerous pattern matched — auto-approved', matched: null, source: 'unmatchedDefault' };
 }
 
 module.exports = { evaluate, summarize, DEFAULT_RULES };

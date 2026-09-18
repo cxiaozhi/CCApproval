@@ -1,104 +1,71 @@
 'use strict';
 /**
- * File-based request/decision store shared by the hook process and the server.
+ * Append-only audit log shared by two processes: the hook appends one entry per
+ * tool call, the log panel server reads the tail. No locking needed — appends
+ * are atomic enough at this size and readers only ever want recent lines.
  *
  * Layout under <dataDir>:
- *   pending/<id>.json    — approval request created by a hook
- *   decisions/<id>.json  — decision written by the server (approve/deny [+ updatedInput])
- *   history.jsonl        — append-only audit log
+ *   history.jsonl   — one JSON object per tool call
+ *   secret          — dashboard token (written by config.js on first run)
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const MAX_LINES = 5000;
+
 class Store {
-  constructor(dataDir, historyLimit = 200) {
+  constructor(dataDir) {
     this.dataDir = dataDir;
-    this.pendingDir = path.join(dataDir, 'pending');
-    this.decisionsDir = path.join(dataDir, 'decisions');
     this.historyFile = path.join(dataDir, 'history.jsonl');
-    this.historyLimit = historyLimit;
-    for (const d of [this.pendingDir, this.decisionsDir]) fs.mkdirSync(d, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true });
   }
 
   newId() {
     return Date.now().toString(36) + '-' + crypto.randomBytes(4).toString('hex');
   }
 
-  writeJsonAtomic(file, obj) {
-    const tmp = file + '.tmp-' + process.pid;
-    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-    fs.renameSync(tmp, file);
-  }
-
-  createRequest(req) {
-    const id = this.newId();
-    const record = { id, status: 'pending', createdAt: new Date().toISOString(), ...req };
-    this.writeJsonAtomic(path.join(this.pendingDir, id + '.json'), record);
-    this.log({ type: 'request', id, tool: req.toolName, summary: req.summary });
-    return record;
-  }
-
-  getRequest(id) {
-    try { return JSON.parse(fs.readFileSync(path.join(this.pendingDir, id + '.json'), 'utf8')); }
-    catch { return null; }
-  }
-
-  markStatus(id, status, extra = {}) {
-    const req = this.getRequest(id);
-    if (!req) return null;
-    const updated = { ...req, status, decidedAt: new Date().toISOString(), ...extra };
-    this.writeJsonAtomic(path.join(this.pendingDir, id + '.json'), updated);
-    return updated;
-  }
-
-  writeDecision(id, decision) {
-    // decision: { action: 'allow'|'deny', reason?, updatedInput? }
-    this.writeJsonAtomic(path.join(this.decisionsDir, id + '.json'), {
-      id, ...decision, decidedAt: new Date().toISOString()
-    });
-    this.log({ type: 'decision', id, action: decision.action, reason: decision.reason });
-  }
-
-  getDecision(id) {
-    try { return JSON.parse(fs.readFileSync(path.join(this.decisionsDir, id + '.json'), 'utf8')); }
-    catch { return null; }
-  }
-
-  listPending() {
-    return fs.readdirSync(this.pendingDir)
-      .filter(f => f.endsWith('.json'))
-      .map(f => { try { return JSON.parse(fs.readFileSync(path.join(this.pendingDir, f), 'utf8')); } catch { return null; } })
-      .filter(r => r && r.status === 'pending')
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  }
-
-  listRequests(limit = 100) {
-    return fs.readdirSync(this.pendingDir)
-      .filter(f => f.endsWith('.json'))
-      .map(f => { try { return JSON.parse(fs.readFileSync(path.join(this.pendingDir, f), 'utf8')); } catch { return null; } })
-      .filter(Boolean)
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-      .slice(0, limit);
-  }
-
-  log(entry) {
+  /** Append one entry. Never throws — audit logging must not block a decision. */
+  record(entry) {
     try {
       fs.appendFileSync(this.historyFile, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
-    } catch { /* non-fatal */ }
+      return true;
+    } catch { return false; }
   }
 
-  /** Remove stale pending/decision files older than maxAgeMs (default 24h). */
-  gc(maxAgeMs = 24 * 3600 * 1000) {
-    const cutoff = Date.now() - maxAgeMs;
-    for (const dir of [this.pendingDir, this.decisionsDir]) {
-      for (const f of fs.readdirSync(dir)) {
-        try {
-          const st = fs.statSync(path.join(dir, f));
-          if (st.mtimeMs < cutoff) fs.unlinkSync(path.join(dir, f));
-        } catch { /* ignore */ }
-      }
+  /** Most recent entries, newest first. Legacy lines predate the `status` field. */
+  list(limit = 200) {
+    let text;
+    try { text = fs.readFileSync(this.historyFile, 'utf8'); } catch { return []; }
+    const lines = text.split('\n');
+    const out = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      try {
+        const rec = JSON.parse(line);
+        // The old per-file store also wrote its internal event stream (type:
+        // 'decision'|'notified') into this same file. Those carry no tool call
+        // and no outcome, so they would render as blank rows.
+        if (rec.type) continue;
+        out.push({ status: 'unknown', ...rec });
+      } catch { /* skip malformed line */ }
     }
+    return out;
+  }
+
+  /** Keep only the last maxLines entries. Called on server start and hourly. */
+  trim(maxLines = MAX_LINES) {
+    let lines;
+    try {
+      lines = fs.readFileSync(this.historyFile, 'utf8').split('\n').filter(l => l.trim());
+    } catch { return; }
+    if (lines.length <= maxLines) return;
+    try {
+      const tmp = this.historyFile + '.tmp-' + process.pid;
+      fs.writeFileSync(tmp, lines.slice(-maxLines).join('\n') + '\n');
+      fs.renameSync(tmp, this.historyFile);
+    } catch { /* non-fatal */ }
   }
 }
 

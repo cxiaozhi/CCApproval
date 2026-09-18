@@ -1,27 +1,14 @@
 {
   "port": 4317,
-  "host": "0.0.0.0",
-  "publicUrl": null,
-  "timeoutMs": 180000,
-  "fallback": "ask",
+  "host": "127.0.0.1",
   "unmatchedDefault": "allow",
-  "remoteAction": "allow",
-  "notify": {
-    "email": {
-      "host": "smtp.qq.com",
-      "port": 465,
-      "secure": true,
-      "auth": { "user": "you@qq.com", "pass": "SMTP授权码" },
-      "from": "you@qq.com",
-      "to": "you@qq.com"
-    },
-    "webhook": null
-  },
+  "dangerousDefault": "allow",
+  "historyLimit": 10,
   "rules": {
     "deny": [
       { "tool": "Bash", "command": "rm -rf\\s+~", "reason": "deleting home directory" }
     ],
-    "remote": [
+    "ask": [
       { "tool": "Write|Edit|MultiEdit", "path": "\\.(env|pem|key)$", "reason": "modifying secrets file" }
     ],
     "allow": [

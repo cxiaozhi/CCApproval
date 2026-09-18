@@ -2,12 +2,24 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|Task|ExitPlanTool",
+        "matcher": "^(Bash|PowerShell|Write|Edit|NotebookEdit|WebFetch|Agent|ExitPlanMode|mcp__Claude_Browser__.*)$",
         "hooks": [
           {
             "type": "command",
             "command": "node F:/workspace/CCApproval/src/hook.js",
-            "timeout": 300
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node F:/workspace/CCApproval/src/hook.js permission",
+            "timeout": 30
           }
         ]
       }
